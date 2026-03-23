@@ -1,0 +1,281 @@
+import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
+import { Sun, Moon } from "lucide-react";
+import { initializeApp } from "firebase/app";
+import {
+  getAuth,
+  signInWithPopup,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signOut,
+} from "firebase/auth";
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  getDocs,
+  doc,
+  setDoc,
+  getDoc,
+  deleteDoc
+} from "firebase/firestore";
+
+// Firebase Config - Replace with your keys
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_AUTH_DOMAIN",
+  projectId: "YOUR_PROJECT_ID",
+  appId: "YOUR_APP_ID",
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const provider = new GoogleAuthProvider();
+
+export default function App() {
+  const [darkMode, setDarkMode] = useState(false);
+  const [user, setUser] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [query, setQuery] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAds, setShowAds] = useState(true);
+  const [amazonApiKey, setAmazonApiKey] = useState("");
+  const [isPremium, setIsPremium] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("1234");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [premiumOptions, setPremiumOptions] = useState([]);
+  const [newPremiumOption, setNewPremiumOption] = useState("");
+  const [googleAdsPermission, setGoogleAdsPermission] = useState("");
+  const [developerCodeRequest, setDeveloperCodeRequest] = useState("");
+  const [developerCodeResponse, setDeveloperCodeResponse] = useState("");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        const docRef = doc(db, "premiumUsers", u.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setIsPremium(docSnap.data().isPremium);
+          setShowAds(!docSnap.data().isPremium);
+        }
+      }
+    });
+
+    const loadPremiumOptions = async () => {
+      const snapshot = await getDocs(collection(db, "premiumOptions"));
+      setPremiumOptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    };
+    loadPremiumOptions();
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      const result = await signInWithPopup(auth, provider);
+      setUser(result.user);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setUser(null);
+    setIsPremium(false);
+    setIsAdmin(false);
+  };
+
+  const handleSearch = async () => {
+    if (!query) return;
+
+    await addDoc(collection(db, "searches"), {
+      query,
+      user: user?.uid || "guest",
+      createdAt: new Date(),
+    });
+
+    const snapshot = await getDocs(collection(db, "searches"));
+    const results = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      title: doc.data().query,
+      price: `$${(Math.random() * 100).toFixed(2)}`,
+      rating: (Math.random() * 5).toFixed(1),
+    }));
+
+    setProducts(results);
+  };
+
+  const handlePremium = async () => {
+    if (!user) return;
+    await setDoc(doc(db, "premiumUsers", user.uid), { isPremium: true });
+    setIsPremium(true);
+    setShowAds(false);
+  };
+
+  const handleAdminLogin = () => {
+    if (passwordInput === adminPassword) {
+      setIsAdmin(true);
+      setPasswordInput("");
+    } else {
+      alert("Incorrect password");
+    }
+  };
+
+  const handleChangePassword = (newPass) => {
+    setAdminPassword(newPass);
+    alert("Admin password updated!");
+  };
+
+  const handleAddPremiumOption = async () => {
+    if (!newPremiumOption) return;
+    const docRef = await addDoc(collection(db, "premiumOptions"), { name: newPremiumOption });
+    setPremiumOptions([...premiumOptions, { id: docRef.id, name: newPremiumOption }]);
+    setNewPremiumOption("");
+  };
+
+  const handleDeletePremiumOption = async (id) => {
+    await deleteDoc(doc(db, "premiumOptions", id));
+    setPremiumOptions(premiumOptions.filter(option => option.id !== id));
+  };
+
+  const handleDeveloperCodeRequest = () => {
+    setDeveloperCodeResponse(`Generated code for: ${developerCodeRequest}`);
+  };
+
+  const downloadCodeFile = (filename, content) => {
+    const blob = new Blob([content], { type: 'text/javascript' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+  };
+
+  return (
+    <div className={darkMode ? "dark" : ""}>
+      <div className="min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-white transition-colors duration-300">
+
+        {/* Navbar */}
+        <div className="flex justify-between items-center p-4 shadow-md">
+          <h1 className="text-xl font-bold">Product Finder</h1>
+          <div className="flex items-center gap-3">
+            {user ? (
+              <>
+                <span className="text-sm">Hi, {user.displayName}</span>
+                <button onClick={handleLogout} className="px-3 py-1 bg-red-500 text-white rounded">Logout</button>
+              </>
+            ) : (
+              <button onClick={handleLogin} className="px-3 py-1 bg-blue-600 text-white rounded">Login</button>
+            )}
+            <button onClick={() => setDarkMode(!darkMode)} className="p-2 bg-gray-200 dark:bg-gray-700 rounded">
+              {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Hero Section */}
+        <div className="flex flex-col items-center mt-16 px-4">
+          <motion.h2 initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="text-3xl md:text-5xl font-bold mb-6 text-center">
+            Discover Products
+          </motion.h2>
+          <div className="flex w-full max-w-2xl bg-gray-100 dark:bg-gray-800 p-2 rounded">
+            <input value={query} onChange={(e) => setQuery(e.target.value)} className="flex-1 bg-transparent px-2" placeholder="Search products..." />
+            <button onClick={handleSearch} className="bg-blue-600 text-white px-4 rounded">Search</button>
+          </div>
+        </div>
+
+        {/* Ads Section */}
+        {showAds && (
+          <div className="p-4 text-center bg-yellow-200 text-black mt-6">
+            Ads Placeholder (Connect Google AdSense)
+          </div>
+        )}
+
+        {/* Product Results */}
+        <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {products.map((p) => (
+            <div key={p.id} className="p-4 bg-gray-100 dark:bg-gray-800 rounded shadow">
+              <h3 className="font-bold">{p.title}</h3>
+              <p>Price: {p.price}</p>
+              <p>Rating: ⭐ {p.rating}</p>
+              <button className="mt-2 w-full bg-blue-600 text-white py-2 rounded">View</button>
+            </div>
+          ))}
+        </div>
+
+        {/* Admin Panel */}
+        {isAdmin && (
+          <div className="p-6 bg-gray-200 dark:bg-gray-700 mt-10 rounded">
+            <h2 className="font-bold mb-4">Admin Panel</h2>
+
+            {/* Amazon API Box */}
+            <div className="mt-4">
+              <label className="block mb-2 font-semibold">Amazon API Key (placeholder)</label>
+              <input type="text" value={amazonApiKey} onChange={(e) => setAmazonApiKey(e.target.value)} placeholder="Enter Amazon API key later" className="w-full p-2 rounded bg-white dark:bg-gray-800 outline-none" />
+            </div>
+
+            {/* Change Password Section */}
+            <div className="mt-4">
+              <label className="block mb-2 font-semibold">Change Admin Password</label>
+              <input type="text" placeholder="New Password" className="w-full p-2 rounded bg-white dark:bg-gray-800 outline-none" onChange={(e) => setPasswordInput(e.target.value)} />
+              <button onClick={() => handleChangePassword(passwordInput)} className="mt-2 bg-blue-600 text-white px-4 py-2 rounded">Update Password</button>
+            </div>
+
+            {/* Google Ads Permissions Section */}
+            <div className="mt-4">
+              <label className="block mb-2 font-semibold">Google Ads Permissions</label>
+              <input type="text" value={googleAdsPermission} onChange={(e) => setGoogleAdsPermission(e.target.value)} placeholder="Enter AdSense permissions here" className="w-full p-2 rounded bg-white dark:bg-gray-800 outline-none" />
+            </div>
+
+            {/* Developer Coding Section */}
+            <div className="mt-4">
+              <label className="block mb-2 font-semibold">Developer Coding Help</label>
+              <textarea
+                value={developerCodeRequest}
+                onChange={(e) => setDeveloperCodeRequest(e.target.value)}
+                placeholder="Type feature or code request here"
+                className="w-full p-2 rounded bg-white dark:bg-gray-800 outline-none mb-2"
+              />
+              <button onClick={handleDeveloperCodeRequest} className="bg-blue-600 text-white px-4 py-2 rounded mb-2">Generate Code</button>
+              {developerCodeResponse && (
+                <>
+                  <pre className="bg-gray-300 dark:bg-gray-900 p-2 rounded overflow-x-auto">{developerCodeResponse}</pre>
+                  <button onClick={() => downloadCodeFile('NewFeature.js', developerCodeResponse)} className="bg-green-600 text-white px-4 py-2 rounded mt-2">Download Code</button>
+                </>
+              )}
+            </div>
+
+            {/* Premium Options Management */}
+            <div className="mt-4">
+              <h3 className="font-bold mb-2">Manage Premium Options</h3>
+              <input type="text" placeholder="New Premium Option" value={newPremiumOption} onChange={(e) => setNewPremiumOption(e.target.value)} className="w-full p-2 rounded bg-white dark:bg-gray-800 mb-2 outline-none" />
+              <button onClick={handleAddPremiumOption} className="bg-green-600 text-white px-4 py-2 rounded mb-2">Add Option</button>
+              <ul>
+                {premiumOptions.map(option => (
+                  <li key={option.id} className="flex justify-between items-center mb-1">
+                    <span>{option.name}</span>
+                    <button onClick={() => handleDeletePremiumOption(option.id)} className="bg-red-500 text-white px-2 py-1 rounded">Delete</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* Premium Section */}
+        {user && !isPremium && (
+          <div className="p-6 bg-green-200 dark:bg-green-700 mt-10 rounded text-center">
+            <h2 className="font-bold mb-2">Go Premium</h2>
+            <p className="mb-4">Remove ads and unlock advanced features</p>
+            <button onClick={handlePremium} className="bg-green-600 text-white px-4 py-2 rounded">Activate Premium</button>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="text-center p-4 opacity-70">© 2026 Product Finder SaaS</div>
+      </div>
+    </div>
+  );
+}
